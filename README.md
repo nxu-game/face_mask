@@ -1,41 +1,47 @@
-# 人脸换脸谱应用
+# Face Mask Application
 
-这是一个基于 Python 的实时人脸换脸谱应用，使用 MediaPipe 进行人脸检测和手势识别，可以实时为检测到的人脸添加脸谱效果。
+A real-time face mask application built with Python that uses MediaPipe for face detection and gesture recognition to apply traditional opera masks to detected faces.
 
-## 功能特点
+![Face Mask Application Demo](face-mask.png)
 
-- 实时人脸检测
-- 自动脸谱对齐和缩放
-- 手势控制切换脸谱
-- 支持键盘快捷键
-- 支持多种图片格式（PNG/JPG）
+## Features
 
-## 安装依赖
+- Real-time face detection
+- Automatic mask alignment and scaling
+- Gesture-based mask switching
+- Keyboard shortcuts support
+- Multiple image format support (PNG/JPG)
+
+## Requirements
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## 使用说明
+## Usage
 
-1. 确保 `face` 目录中包含脸谱图片（支持 PNG 和 JPG 格式）
-2. 运行程序：
+1. Ensure the `face` directory contains mask images (PNG and JPG formats supported)
+2. Run the program:
    ```bash
    python main.py
    ```
 
-## 操作方法
+## Controls
 
-- 将手靠近脸部：自动切换下一个脸谱
-- 按 'N' 键：手动切换下一个脸谱
-- 按 'ESC' 键：退出程序
+- Move hand close to face: Automatically switch to next mask
+- Press 'N' key: Manually switch to next mask
+- Press 'ESC' key: Exit program
 
-## 配置说明
+## Configuration
 
-可以在 `FaceMaskApp` 类的 `config` 字典中修改以下参数：
+You can modify the following parameters in the `FaceMaskApp` class's `config` dictionary:
 
-- `window_name`: 窗口名称
-- `display_size`: 显示窗口大小
-- `hand_face_threshold`: 手脸距离阈值
-- `mask_alpha`: 脸谱透明度
-- `original_eye_distance`: 眼睛距离基准值 
+- `window_name`: Window title
+- `display_size`: Display window size
+- `hand_face_threshold`: Hand-face distance threshold
+- `mask_alpha`: Mask transparency
+- `original_eye_distance`: Base value for eye distance
+
+## Privacy Notice
+
+This application processes video feed in real-time and does not store any personal data. All processing is done locally on your device. 
