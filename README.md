@@ -2,7 +2,7 @@
 
 A real-time face mask application built with Python that uses MediaPipe for face detection and gesture recognition to apply traditional opera masks to detected faces.
 
-![Face Mask Application Demo](face-mask.png)
+![Face Mask Application Demo](https://github.com/wangqiqi/interesting_assets/raw/main/images/face-mask.png)
 
 ## Features
 
