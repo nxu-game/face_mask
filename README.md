@@ -44,4 +44,12 @@ You can modify the following parameters in the `FaceMaskApp` class's `config` di
 
 ## Privacy Notice
 
-This application processes video feed in real-time and does not store any personal data. All processing is done locally on your device. 
+This application processes video feed in real-time and does not store any personal data. All processing is done locally on your device.
+
+## Contact
+
+If you have any questions or suggestions, feel free to contact me:
+
+- WeChat: znzatop
+
+![WeChat](https://github.com/wangqiqi/interesting_assets/blob/main/images/wechat.jpg) 
