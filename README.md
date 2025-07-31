@@ -2,7 +2,7 @@
 
 A real-time face mask application built with Python that uses MediaPipe for face detection and gesture recognition to apply traditional opera masks to detected faces.
 
-![Face Mask Application Demo](https://github.com/wangqiqi/interesting_assets/raw/main/images/face_mask.png)
+![Face Mask Application Demo](https://github.com/nxu-game/interesting_assets/raw/main/images/face_mask.png)
 
 ## Features
 
@@ -52,8 +52,8 @@ If you have any questions or suggestions, feel free to contact me:
 
 - WeChat: znzatop
 
-![WeChat](https://github.com/wangqiqi/interesting_assets/raw/main/images/wechat.jpg)
+![WeChat](https://github.com/nxu-game/interesting_assets/raw/main/images/wechat.jpg)
 
 ## More Projects
 
-更多有趣的项目请见：https://github.com/wangqiqi/interesting_assets.git 
+更多有趣的项目请见：https://github.com/nxu-game/interesting_assets.git 
