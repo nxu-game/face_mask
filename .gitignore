@@ -25,6 +25,7 @@ wheels/
 venv/
 ENV/
 
+.venv/
 # IDE
 .idea/
 .vscode/
@@ -34,5 +35,51 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db 
+
+# Web Development
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# Build output
+dist/
+build/
+builds/
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+.parcel-cache/
+.next/
+.nuxt/
+.vuepress/dist/
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+logs/
+*.log
+
+# IDE specific for web
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+
+# Package manager lock files (keep at least one)
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
 
 blog.md
