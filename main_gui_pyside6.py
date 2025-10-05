@@ -15,10 +15,19 @@ from PySide6.QtWidgets import (
     QGroupBox, QRadioButton, QButtonGroup, QToolBar, QProgressBar
 )
 from PySide6.QtCore import Qt, QObject, QThread, Signal, Slot, QTimer, QRect
-from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QImage, QPixmap, QFont, QPalette, QColor, QPainter, QPen, QIcon
 
 import mediapipe as mp
+
+# 用于获取资源绝对路径，兼容PyInstaller打包
+def resource_path(relative_path):
+    """获取资源绝对路径，兼容PyInstaller打包"""
+    try:
+        # PyInstaller创建临时文件夹_MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
 # 全局配置
 PREVIEW_SIZE = 128
@@ -373,7 +382,7 @@ class VideoWorker(QThread):
         actual_height = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
         print(f"摄像头实际分辨率: {actual_width}x{actual_height}")
         
-        self.load_watermark("wechat.jpg")
+        self.load_watermark(resource_path("wechat.jpg"))
 
         self.frame_count = 0
         self.start_time = time.time()
@@ -1194,7 +1203,7 @@ class FaceMaskApp(QMainWindow):
         layout.addWidget(info)
         
         # 添加微信图片（如果存在）
-        wechat_path = os.path.join(os.getcwd(), "wechat.jpg")
+        wechat_path = resource_path("wechat.jpg")
         if os.path.exists(wechat_path):
             wechat_label = QLabel()
             pixmap = QPixmap(wechat_path)

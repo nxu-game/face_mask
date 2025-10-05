@@ -23,7 +23,13 @@ except Exception as e:
 
 # === 3. 应用资源 ===
 app_datas = [('face/', 'face/'), ('wechat.jpg', '.')]
+
+# 确保资源列表正确合并
 all_datas = app_datas + mediapipe_datas + pyside6_datas
+
+# 添加运行时路径处理支持
+import sys
+sys.path.append(current_dir)
 
 # === 4. 隐藏导入 ===
 hiddenimports = [
@@ -69,7 +75,15 @@ excludes = [
     # 注意：没有 'pickle', 'pyexpat', 'xml', 'urllib'！
 ]
 
-# === 6. 分析与构建 ===
+# === 6. 添加PySide6插件支持 ===
+# 显式打包PySide6的plugins目录，确保jpg等图像格式能正常加载
+import PySide6
+pyside6_dir = os.path.dirname(PySide6.__file__)
+plugins_src = os.path.join(pyside6_dir, 'plugins')
+if os.path.exists(plugins_src):
+    all_datas.append((plugins_src, 'PySide6/plugins'))
+
+# === 7. 分析与构建 ===
 a = Analysis(
     ['main_gui_pyside6.py'],
     pathex=[current_dir],
