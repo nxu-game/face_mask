@@ -53,8 +53,6 @@ class FaceMaskApp:
             mask_img = cv2.imread(image_file, cv2.IMREAD_UNCHANGED)
             if mask_img is not None:
                 masks.append(mask_img)
-            else:
-                print(f"Failed to load mask image: {image_file}")
         return masks
 
     def rotate_image(self, image: np.ndarray, angle: float) -> np.ndarray:
@@ -125,7 +123,6 @@ class FaceMaskApp:
             添加脸谱后的图像
         """
         if mask_image is None or len(face_landmarks) < 468:
-            print("Invalid mask image or insufficient landmarks")
             return image
 
         h, w = image.shape[:2]
@@ -144,8 +141,7 @@ class FaceMaskApp:
             # 调整脸谱大小和角度
             mask_resized = cv2.resize(mask_image, (0, 0), fx=scale, fy=scale)
             mask_rotated = self.rotate_image(mask_resized, angle)
-        except Exception as e:
-            print(f"Error resizing or rotating mask: {e}")
+        except:
             return image
 
         # 计算脸谱位置
@@ -164,18 +160,22 @@ class FaceMaskApp:
         mask_start_x = start_x - center_x
         mask_end_x = mask_start_x + (end_x - start_x)
 
+        # 反转透明度逻辑：透明度值越低，脸谱越明显；透明度值越高，脸谱越透明
+        # 0% 完全显示脸谱，100% 完全透明
+        inverted_alpha = 1.0 - self.config['mask_alpha']
+        
         # 应用脸谱
         if mask_rotated.shape[2] == 4:  # 带Alpha通道的图像
             for i in range(3):
                 image[start_y:end_y, start_x:end_x, i] = (
-                    image[start_y:end_y, start_x:end_x, i] * (1 - self.config['mask_alpha']) +
+                    image[start_y:end_y, start_x:end_x, i] * inverted_alpha +
                     mask_rotated[mask_start_y:mask_end_y, mask_start_x:mask_end_x, i] * self.config['mask_alpha']
                 ).astype(np.uint8)
         else:  # 无Alpha通道的图像
             for i in range(3):
                 image[start_y:end_y, start_x:end_x, i] = cv2.addWeighted(
                     image[start_y:end_y, start_x:end_x, i],
-                    1 - self.config['mask_alpha'],
+                    inverted_alpha,
                     mask_rotated[mask_start_y:mask_end_y, mask_start_x:mask_end_x, i],
                     self.config['mask_alpha'],
                     0
@@ -217,7 +217,6 @@ class FaceMaskApp:
                         # 检查手是否靠近脸
                         h, w = frame.shape[:2]
                         if self.is_hand_near_face(hand_landmarks, face_landmarks, w, h):
-                            print("Hand is near the face!")
                             self.current_mask_index = (self.current_mask_index + 1) % len(self.face_masks)
 
                 # 应用当前选中的脸谱
@@ -236,7 +235,6 @@ class FaceMaskApp:
         self.face_masks = self.load_face_masks()
         
         if not self.face_masks:
-            print("No face masks loaded!")
             return
 
         # 创建 MediaPipe 实例
@@ -252,7 +250,6 @@ class FaceMaskApp:
             while self.cap.isOpened():
                 success, frame = self.cap.read()
                 if not success:
-                    print("Failed to capture frame")
                     break
 
                 # 处理帧
@@ -284,8 +281,8 @@ def main():
     app = FaceMaskApp()
     try:
         app.run()
-    except Exception as e:
-        print(f"Error running application: {e}")
+    except:
+        pass
     finally:
         app.cleanup()
 

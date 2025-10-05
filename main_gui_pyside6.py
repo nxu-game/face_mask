@@ -12,9 +12,9 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton,
     QSlider, QVBoxLayout, QHBoxLayout, QFrame, QGridLayout,
     QMessageBox, QStatusBar, QSizePolicy, QDialog, QScrollArea,
-    QGroupBox, QRadioButton, QButtonGroup, QToolBar
+    QGroupBox, QRadioButton, QButtonGroup, QToolBar, QProgressBar
 )
-from PySide6.QtCore import Qt, QThread, Signal, Slot, QTimer, QRect
+from PySide6.QtCore import Qt, QObject, QThread, Signal, Slot, QTimer, QRect
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QImage, QPixmap, QFont, QPalette, QColor, QPainter, QPen
 
@@ -33,6 +33,75 @@ class Mode:
     FACE_MESH = 1
     HAND_SKELETON = 2
     BODY_SKELETON = 3
+
+
+class ResourceLoader(QObject):
+    """资源加载器，在单独线程中加载资源"""
+    progress_updated = Signal(int, str)  # 进度值, 状态消息
+    loading_completed = Signal()         # 加载完成
+    loading_failed = Signal(str)         # 加载失败，附带错误信息
+    finished = Signal()                  # 任务完成信号
+    
+    def __init__(self, mode, parent_app):
+        super().__init__()
+        self.mode = mode
+        self.parent_app = parent_app
+    
+    @Slot()
+    def load_resources(self):
+        """加载对应模式的资源"""
+        try:
+            if self.mode == Mode.FACE_MASK:
+                # 加载川剧变脸模式所需资源
+                self.progress_updated.emit(0, "准备加载川剧变脸资源...")
+                time.sleep(0.1)  # 短暂延迟以便UI更新
+                
+                self.progress_updated.emit(20, "正在加载脸谱图像...")
+                # 模拟进度更新
+                for i in range(20, 80):
+                    time.sleep(0.01)  # 模拟加载延迟
+                    self.progress_updated.emit(i, "正在加载脸谱图像...")
+                
+                # 实际加载资源
+                self.parent_app.load_face_masks()
+                self.progress_updated.emit(80, "脸谱图像加载完成")
+                
+                time.sleep(0.1)  # 短暂延迟
+                self.progress_updated.emit(100, "资源加载完成")
+                
+            elif self.mode == Mode.FACE_MESH:
+                # 加载人脸网格模式所需资源
+                self.progress_updated.emit(0, "准备加载人脸网格资源...")
+                time.sleep(0.1)
+                self.progress_updated.emit(50, "正在初始化人脸检测模型...")
+                time.sleep(0.2)
+                self.progress_updated.emit(100, "人脸网格资源加载完成")
+                
+            elif self.mode == Mode.HAND_SKELETON:
+                # 加载手部骨架模式所需资源
+                self.progress_updated.emit(0, "准备加载手部骨架资源...")
+                time.sleep(0.1)
+                self.progress_updated.emit(50, "正在初始化手部检测模型...")
+                time.sleep(0.2)
+                self.progress_updated.emit(100, "手部骨架资源加载完成")
+                
+            elif self.mode == Mode.BODY_SKELETON:
+                # 加载人体骨架模式所需资源
+                self.progress_updated.emit(0, "准备加载人体骨架资源...")
+                time.sleep(0.1)
+                self.progress_updated.emit(50, "正在初始化人体检测模型...")
+                time.sleep(0.2)
+                self.progress_updated.emit(100, "人体骨架资源加载完成")
+                
+            # 发出完成信号
+            self.loading_completed.emit()
+            
+        except Exception as e:
+            # 发出失败信号
+            self.loading_failed.emit(str(e))
+        finally:
+            # 发出完成信号
+            self.finished.emit()
 
 
 class VideoWorker(QThread):
@@ -134,7 +203,7 @@ class VideoWorker(QThread):
     def draw_face_mesh(self, image, face_landmarks):
         if not face_landmarks:
             return image
-        overlay = image.copy()
+        overlay = np.zeros_like(image)
         for face_lm in face_landmarks:
             self.mp_drawing.draw_landmarks(
                 image=overlay,
@@ -150,12 +219,14 @@ class VideoWorker(QThread):
                 landmark_drawing_spec=None,
                 connection_drawing_spec=self.mp_drawing_styles.get_default_face_mesh_contours_style()
             )
-        return cv2.addWeighted(image, 0.5, overlay, 0.5, 0)
+        # 反转透明度逻辑，使其与用户期望一致：0%表示网格完全可见，100%表示网格完全透明
+        # 现在控制摄像头画面的透明度，而不是网格的透明度
+        return cv2.addWeighted(image, 1.0 - self.mask_alpha, overlay, 1.0, 0)
 
     def draw_hand_skeleton(self, image, hand_landmarks):
         if not hand_landmarks:
             return image
-        overlay = image.copy()
+        overlay = np.zeros_like(image)
         for hand_lm in hand_landmarks:
             self.mp_drawing.draw_landmarks(
                 image=overlay,
@@ -164,12 +235,14 @@ class VideoWorker(QThread):
                 landmark_drawing_spec=self.mp_drawing_styles.get_default_hand_landmarks_style(),
                 connection_drawing_spec=self.mp_drawing_styles.get_default_hand_connections_style()
             )
-        return cv2.addWeighted(image, 0.5, overlay, 0.5, 0)
+        # 反转透明度逻辑，使其与用户期望一致：0%表示骨架完全可见，100%表示骨架完全透明
+        # 现在控制摄像头画面的透明度，而不是骨架的透明度
+        return cv2.addWeighted(image, 1.0 - self.mask_alpha, overlay, 1.0, 0)
 
     def draw_body_skeleton(self, image, pose_landmarks):
         if not pose_landmarks:
             return image
-        overlay = image.copy()
+        overlay = np.zeros_like(image)
         # 处理单个pose_landmarks对象（不是列表）
         self.mp_drawing.draw_landmarks(
             image=overlay,
@@ -178,7 +251,9 @@ class VideoWorker(QThread):
             landmark_drawing_spec=self.mp_drawing.DrawingSpec(color=(0, 255, 0), thickness=2, circle_radius=2),
             connection_drawing_spec=self.mp_drawing.DrawingSpec(color=(255, 0, 0), thickness=2)
         )
-        return cv2.addWeighted(image, 0.5, overlay, 0.5, 0)
+        # 反转透明度逻辑，使其与用户期望一致：0%表示骨架完全可见，100%表示骨架完全透明
+        # 现在控制摄像头画面的透明度，而不是骨架的透明度
+        return cv2.addWeighted(image, 1.0 - self.mask_alpha, overlay, 1.0, 0)
 
     def add_watermark(self, image):
         if self.wechat_watermark is None:
@@ -243,12 +318,14 @@ class VideoWorker(QThread):
         mask_roi = rotated[mask_sy:mask_ey, mask_sx:mask_ex]
         if mask_roi.size == 0 or roi.size == 0:
             return image
+        # 反转透明度逻辑，使其与用户期望一致：0%表示完全显示脸谱，100%表示完全透明
+        inverted_alpha = 1.0 - self.mask_alpha
         if mask_roi.shape[2] == 4:
-            alpha = mask_roi[:, :, 3].astype(np.float32) / 255.0 * self.mask_alpha
+            alpha = mask_roi[:, :, 3].astype(np.float32) / 255.0 * inverted_alpha
             for c in range(3):
                 roi[:, :, c] = (1 - alpha) * roi[:, :, c] + alpha * mask_roi[:, :, c]
         else:
-            blended = cv2.addWeighted(roi, 1 - self.mask_alpha, mask_roi, self.mask_alpha, 0)
+            blended = cv2.addWeighted(roi, self.mask_alpha, mask_roi, inverted_alpha, 0)
             image[start_y:end_y, start_x:end_x] = blended
         return image
 
@@ -274,7 +351,6 @@ class VideoWorker(QThread):
         for i in camera_indices:
             self.cap = cv2.VideoCapture(i)
             if self.cap.isOpened():
-                print(f"成功打开摄像头索引: {i}")
                 break
             else:
                 self.cap.release()
@@ -298,7 +374,6 @@ class VideoWorker(QThread):
         while self._is_running:
             success, frame = self.cap.read()
             if not success:
-                print("摄像头读取失败")
                 continue
 
             # 统一在 RGB 空间处理
@@ -380,18 +455,7 @@ class VideoWorker(QThread):
                 video_frame = self.add_watermark(display_frame.copy())
                 self.video_writer.write(video_frame)
 
-            # 调试：检查帧数据
-            if self.frame_count % 30 == 0:  # 每30帧打印一次调试信息
-                print(f"帧尺寸: {display_frame.shape}, 数据类型: {display_frame.dtype}, 模式: {self.current_mode}")
-                # 检查帧是否全黑
-                if np.all(display_frame == 0):
-                    print("警告：检测到全黑帧！")
-                else:
-                    print(f"帧非全黑，像素范围: {display_frame.min()} - {display_frame.max()}")
 
-            # 调试：检查frame_ready信号是否被发射
-            if self.frame_count % 10 == 0:
-                print(f"发射frame_ready信号: 第{self.frame_count}帧")
             self.frame_ready.emit(display_frame)
             self.msleep(30)
 
@@ -419,11 +483,13 @@ class FaceMaskApp(QMainWindow):
         self.is_recording = False
         self.worker = None
         self.latest_frame = None  # 用于截图
+        self.resources_loaded = False  # 标记资源是否已加载
 
         self.init_ui()
-        self.load_face_masks()
+        # 默认不加载资源，按需加载
+        # self.load_face_masks()
         self.setup_connections()
-        self.update_mask_preview()
+        # self.update_mask_preview()
 
     def setup_connections(self):
         if self.worker is None:
@@ -447,9 +513,31 @@ class FaceMaskApp(QMainWindow):
 
         # === 顶部工具栏 ===
         top_toolbar = QToolBar()
-        top_toolbar.setFixedHeight(60)
+        top_toolbar.setFixedHeight(70)
+        top_toolbar.setStyleSheet("background-color: #f0f0f0;")
         main_layout.addWidget(top_toolbar)
 
+        # 工具栏按钮通用样式
+        button_style = """
+            QPushButton {
+                padding: 12px 16px;
+                border-radius: 12px;
+                font-size: 14px;
+                font-weight: bold;
+                color: white;
+                background-color: #4CAF50;
+            }
+            QPushButton:hover {
+                opacity: 0.9;
+            }
+            QPushButton:checked {
+                background-color: #3e8e41;
+                border: 2px solid #2e7d32;
+            }
+        """
+
+        # 模式按钮 - 鲜艳的绿色系
+        mode_button_style = button_style.replace("background-color: #4CAF50;", "background-color: #4CAF50;")
         self.mode_buttons = {}
         modes = [
             (Mode.FACE_MASK, "川剧变脸"),
@@ -461,6 +549,7 @@ class FaceMaskApp(QMainWindow):
         for mode, text in modes:
             btn = QPushButton(text)
             btn.setCheckable(True)
+            btn.setStyleSheet(mode_button_style)
             btn.clicked.connect(lambda _, m=mode: self.switch_mode(m))
             self.mode_buttons[mode] = btn
             top_toolbar.addWidget(btn)
@@ -469,17 +558,31 @@ class FaceMaskApp(QMainWindow):
 
         top_toolbar.addSeparator()
 
+        # 控制按钮 - 鲜艳的蓝色系
+        control_button_style = button_style.replace("background-color: #4CAF50;", "background-color: #2196F3;")
+        
+        # 将开始/停止按钮移到顶部工具栏
+        self.toggle_button = QPushButton("开始")
+        self.toggle_button.setStyleSheet(control_button_style)
+        self.toggle_button.clicked.connect(self.toggle_camera)
+        top_toolbar.addWidget(self.toggle_button)
+
+        top_toolbar.addSeparator()
+
         screenshot_btn = QPushButton("截图")
+        screenshot_btn.setStyleSheet(control_button_style)
         screenshot_btn.clicked.connect(self.take_screenshot)
         top_toolbar.addWidget(screenshot_btn)
 
         self.record_btn = QPushButton("录制视频")
+        self.record_btn.setStyleSheet(control_button_style)
         self.record_btn.clicked.connect(self.toggle_recording)
         top_toolbar.addWidget(self.record_btn)
 
         top_toolbar.addSeparator()
 
         about_btn = QPushButton("关于我")
+        about_btn.setStyleSheet(control_button_style)
         about_btn.clicked.connect(self.show_about_dialog)
         top_toolbar.addWidget(about_btn)
 
@@ -495,23 +598,100 @@ class FaceMaskApp(QMainWindow):
         self.video_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         center_layout.addWidget(self.video_label, 1)
 
-        # 透明度滑块
+        # 右侧面板：透明度滑块
         right_panel = QWidget()
-        right_panel.setFixedWidth(100)
+        right_panel.setFixedWidth(120)
+        right_panel.setStyleSheet("background-color: #ffffff; border-left: 1px solid #dddddd;")
         right_layout = QVBoxLayout(right_panel)
+        right_layout.setAlignment(Qt.AlignTop)
+        right_layout.addSpacing(30)
+        
         alpha_label = QLabel("透明度:")
         alpha_label.setFont(QFont("Microsoft YaHei", 12, QFont.Bold))
+        alpha_label.setStyleSheet("color: #333333;")
         alpha_label.setAlignment(Qt.AlignCenter)
+        right_layout.addWidget(alpha_label)
+        right_layout.addSpacing(15)
+        
+        # 创建一个自定义的滑块容器
+        slider_container = QWidget()
+        slider_container.setStyleSheet("background-color: #f5f5f5; border-radius: 15px; padding: 10px;")
+        slider_layout = QVBoxLayout(slider_container)
+        slider_layout.setContentsMargins(5, 5, 5, 5)
+        
         self.alpha_slider = QSlider(Qt.Vertical)
         self.alpha_slider.setRange(10, 90)
         self.alpha_slider.setValue(int(MASK_ALPHA_DEFAULT * 100))
-        self.alpha_slider.valueChanged.connect(self.on_alpha_changed)
+        self.alpha_slider.setEnabled(True)  # 确保滑块可用
+        self.alpha_slider.setFixedHeight(200)
+        self.alpha_slider.setStyleSheet("""
+            QSlider::groove:vertical {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #FF6B6B, stop:1 #4ECDC4);
+                width: 10px;
+                border-radius: 5px;
+            }
+            QSlider::handle:vertical {
+                background: white;
+                border: 2px solid #4ECDC4;
+                width: 24px;
+                height: 24px;
+                margin: -7px 0;
+                border-radius: 12px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            }
+            QSlider::handle:vertical:hover {
+                background: #4ECDC4;
+                border-color: #45B7AA;
+            }
+            QSlider::handle:vertical:pressed {
+                background: #45B7AA;
+                border-color: #3C9E94;
+                box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+            }
+        """)
+        # 确保valueChanged信号连接到正确的槽
+        try:
+            # 检查是否已经连接了信号
+            if hasattr(self, 'on_alpha_changed'):
+                # 断开之前的连接（如果有）
+                try:
+                    self.alpha_slider.valueChanged.disconnect(self.on_alpha_changed)
+                except:
+                    pass
+                # 重新连接信号
+                self.alpha_slider.valueChanged.connect(self.on_alpha_changed)
+            else:
+                # 如果on_alpha_changed方法不存在，则定义它
+                def on_alpha_changed(value):
+                    self.alpha_value_label.setText(f"{value/100:.2f}")
+                    if self.worker and self.worker.isRunning():
+                        self.worker.set_mask_alpha(value / 100.0)
+                self.on_alpha_changed = on_alpha_changed
+                self.alpha_slider.valueChanged.connect(on_alpha_changed)
+        except Exception as e:
+            print(f"连接透明度滑块信号时出错: {e}")
+            # 作为后备方案，直接在滑块旁边显示值
+            def show_alpha_value(value):
+                self.alpha_value_label.setText(f"{value/100:.2f}")
+            self.alpha_slider.valueChanged.connect(show_alpha_value)
+        
+        slider_layout.addWidget(self.alpha_slider, alignment=Qt.AlignCenter)
+        right_layout.addWidget(slider_container)
+        
         self.alpha_value_label = QLabel(f"{MASK_ALPHA_DEFAULT:.2f}")
-        self.alpha_value_label.setFont(QFont("Microsoft YaHei", 14, QFont.Bold))
+        self.alpha_value_label.setFont(QFont("Microsoft YaHei", 12, QFont.Bold))
+        self.alpha_value_label.setStyleSheet("color: #4ECDC4;")
         self.alpha_value_label.setAlignment(Qt.AlignCenter)
-        right_layout.addWidget(alpha_label)
-        right_layout.addWidget(self.alpha_slider)
         right_layout.addWidget(self.alpha_value_label)
+        right_layout.addSpacing(20)
+        
+        # 添加一些简单的操作说明
+        help_text = QLabel("拖动滑块调整\n效果透明度")
+        help_text.setFont(QFont("Microsoft YaHei", 9))
+        help_text.setStyleSheet("color: #666666;")
+        help_text.setAlignment(Qt.AlignCenter)
+        right_layout.addWidget(help_text)
+        
         right_layout.addStretch()
         center_layout.addWidget(right_panel)
 
@@ -525,16 +705,7 @@ class FaceMaskApp(QMainWindow):
         self.masks_scroll_area.setWidget(self.masks_container)
         main_layout.addWidget(self.masks_scroll_area)
 
-        # 控制按钮
-        control_widget = QWidget()
-        control_layout = QHBoxLayout(control_widget)
-        control_layout.setAlignment(Qt.AlignCenter)
-        self.toggle_button = QPushButton("开始")
-        self.toggle_button.setFont(QFont("Microsoft YaHei", 16, QFont.Bold))
-        self.toggle_button.setStyleSheet("background-color: #4CAF50; color: white; padding: 15px 40px;")
-        self.toggle_button.clicked.connect(self.toggle_camera)
-        control_layout.addWidget(self.toggle_button)
-        main_layout.addWidget(control_widget)
+        # 移除原来的控制按钮区域，控制功能已移至顶部工具栏
 
         # 状态栏
         self.status_bar = QStatusBar()
@@ -627,7 +798,6 @@ class FaceMaskApp(QMainWindow):
             
             # 确保图像数据有效
             if frame.size == 0:
-                print("接收到空帧")
                 return
                 
             # 检查图像格式并正确转换
@@ -642,7 +812,6 @@ class FaceMaskApp(QMainWindow):
             elif frame.shape[2] == 3:  # 已经是BGR
                 pass
             else:
-                print(f"未知的图像格式: {frame.shape}")
                 return
                 
             # 创建QImage
@@ -650,52 +819,28 @@ class FaceMaskApp(QMainWindow):
             qimg = QImage(frame.data, w, h, bytes_per_line, QImage.Format_BGR888)
             
             if qimg.isNull():
-                print("QImage创建失败")
                 return
-            else:
-                print(f"QImage创建成功: {qimg.width()}x{qimg.height()}, 格式: {qimg.format()}")
                 
             # 创建QPixmap
             pixmap = QPixmap.fromImage(qimg)
             if pixmap.isNull():
-                print("QPixmap创建失败")
                 return
-            else:
-                print(f"QPixmap创建成功: {pixmap.width()}x{pixmap.height()}")
-                
-            # 检查video_label状态
-            print(f"video_label尺寸: {self.video_label.size().width()}x{self.video_label.size().height()}")
-            print(f"video_label可见性: {self.video_label.isVisible()}")
-            print(f"video_label启用状态: {self.video_label.isEnabled()}")
-            # 检查父级和布局
-            parent_widget = self.video_label.parentWidget()
-            print(f"video_label父窗口: {parent_widget}")
-            if parent_widget:
-                print(f"父窗口布局: {parent_widget.layout()}")
-                print(f"父窗口可见性: {parent_widget.isVisible()}")
-            # 检查窗口层级和z-index
-            print(f"video_label层级: {self.video_label.raise_()}")
-            print(f"video_label是否在最顶层: {self.video_label.isTopLevel()}")
-                
             # 设置Pixmap
             self.video_label.setPixmap(pixmap.scaled(self.video_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
             
             # 确保video_label和所有父窗口都可见
             if not self.video_label.isVisible():
-                print("警告：video_label被隐藏，正在强制显示")
                 self.video_label.show()
                 
             # 检查并确保所有父窗口都可见
             parent = self.video_label.parentWidget()
             while parent:
                 if not parent.isVisible():
-                    print(f"警告：父窗口 {parent} 被隐藏，正在强制显示")
                     parent.show()
                 parent = parent.parentWidget()
                 
             # 确保主窗口可见
             if not self.isVisible():
-                print("警告：主窗口被隐藏，正在强制显示")
                 self.show()
                 self.raise_()
             
@@ -705,12 +850,10 @@ class FaceMaskApp(QMainWindow):
             QApplication.processEvents()
             # 强制整个窗口重绘
             self.update()
-            print("Pixmap已设置并触发重绘和窗口刷新")
             
         except Exception as e:
-            print(f"显示帧时出错: {e}")
-            import traceback
-            traceback.print_exc()
+            # 捕获但不打印异常，以避免控制台输出
+            pass
 
     @Slot(float)
     def update_fps_display(self, fps):
@@ -793,9 +936,7 @@ class FaceMaskApp(QMainWindow):
         about_dialog.exec()
 
     def start_camera(self):
-        if self.current_mode == Mode.FACE_MASK and not self.face_masks:
-            QMessageBox.critical(self, "错误", "请先加载脸谱图像！")
-            return
+        # 启动摄像头（先启动摄像头，再加载资源）
         if self.worker and self.worker.isRunning():
             self.worker.set_running(False)
             self.worker.wait()
@@ -809,11 +950,103 @@ class FaceMaskApp(QMainWindow):
         self.worker.start()
         self.is_camera_running = True
         self.camera_status_label.setText("摄像头: 开启")
-        self.toggle_button.setText("停止")
-        self.toggle_button.setStyleSheet("background-color: #F44336; color: white; padding: 15px 40px;")
+        
+        # 更新按钮样式和文本
+        toggle_style = ""
+        if self.is_camera_running:
+            self.toggle_button.setText("停止")
+            toggle_style = "background-color: #F44336; color: white; padding: 12px 16px; border-radius: 12px; font-size: 14px; font-weight: bold;"
+        else:
+            self.toggle_button.setText("开始")
+            toggle_style = "background-color: #4CAF50; color: white; padding: 12px 16px; border-radius: 12px; font-size: 14px; font-weight: bold;"
+        self.toggle_button.setStyleSheet(toggle_style)
+        
         mode_names = {Mode.FACE_MASK: "川剧变脸", Mode.FACE_MESH: "人脸网格",
                       Mode.HAND_SKELETON: "手指骨架", Mode.BODY_SKELETON: "人体骨架"}
         self.status_bar.showMessage(f"摄像头运行中 - {mode_names[self.current_mode]}")
+        
+        # 按需加载资源（在单独的线程中进行，不阻塞UI）
+        if not self.resources_loaded:
+            # 在主UI上显示加载进度条
+            if not hasattr(self, 'loading_progress_widget'):
+                # 创建加载指示器控件
+                self.loading_progress_widget = QWidget(self)
+                self.loading_progress_widget.setGeometry(100, 30, 300, 80)
+                self.loading_progress_widget.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+                self.loading_progress_widget.setStyleSheet("background-color: rgba(255, 255, 255, 220); border-radius: 10px; border: 1px solid #cccccc;")
+                
+                # 布局
+                loading_layout = QVBoxLayout(self.loading_progress_widget)
+                loading_layout.setContentsMargins(15, 15, 15, 15)
+                
+                # 标签
+                self.loading_label = QLabel("正在加载资源，请稍候...")
+                self.loading_label.setAlignment(Qt.AlignCenter)
+                self.loading_label.setStyleSheet("color: #333333; font-weight: bold;")
+                loading_layout.addWidget(self.loading_label)
+                
+                # 进度条
+                self.loading_progress = QProgressBar()
+                self.loading_progress.setRange(0, 100)
+                self.loading_progress.setValue(0)
+                self.loading_progress.setStyleSheet("QProgressBar {border: 1px solid grey; border-radius: 5px; text-align: center;}"
+                                                  "QProgressBar::chunk {background-color: #4CAF50; width: 20px;}")
+                loading_layout.addWidget(self.loading_progress)
+                
+            # 显示加载控件
+            self.loading_progress_widget.show()
+            
+            # 创建资源加载线程
+            self.resource_thread = QThread()
+            self.resource_loader = ResourceLoader(self.current_mode, self)
+            self.resource_loader.moveToThread(self.resource_thread)
+            
+            # 连接信号槽
+            self.resource_thread.started.connect(self.resource_loader.load_resources)
+            self.resource_loader.progress_updated.connect(self.update_loading_progress)
+            self.resource_loader.loading_completed.connect(self.on_resources_loaded)
+            self.resource_loader.loading_failed.connect(self.on_resources_failed)
+            self.resource_loader.finished.connect(self.resource_thread.quit)
+            self.resource_thread.finished.connect(self.resource_thread.deleteLater)
+            
+            # 启动线程
+            self.resource_thread.start()
+    
+    def update_loading_progress(self, progress, message):
+        """更新加载进度条和状态消息"""
+        self.loading_progress.setValue(progress)
+        self.loading_label.setText(message)
+        self.status_bar.showMessage(f"加载中: {message}")
+        QApplication.processEvents()
+    
+    def on_resources_loaded(self):
+        """资源加载完成后的回调"""
+        self.resources_loaded = True
+        self.status_bar.showMessage("资源加载完成")
+        
+        # 隐藏加载控件
+        if hasattr(self, 'loading_progress_widget'):
+            self.loading_progress_widget.hide()
+            
+        # 验证模式特定资源
+        if self.current_mode == Mode.FACE_MASK and self.worker:
+            self.worker.set_face_masks(self.face_masks)
+            self.update_mask_preview()
+    
+    def on_resources_failed(self, error_msg):
+        """资源加载失败后的回调"""
+        print(f"资源加载失败: {error_msg}")
+        self.status_bar.showMessage(f"资源加载失败: {error_msg}")
+        
+        # 隐藏加载控件
+        if hasattr(self, 'loading_progress_widget'):
+            self.loading_progress_widget.hide()
+            
+        # 显示错误消息，但不停止摄像头
+        QMessageBox.critical(self, "错误", f"资源加载失败: {error_msg}\n\n摄像头仍可使用，但部分功能可能受限。")
+    
+    # 摄像头启动逻辑已移至方法开头
+    
 
     def stop_camera(self):
         if not self.is_camera_running:
@@ -825,8 +1058,12 @@ class FaceMaskApp(QMainWindow):
             self.worker.wait(2000)
         self.is_camera_running = False
         self.camera_status_label.setText("摄像头: 未开启")
-        self.toggle_button.setText("开始")
-        self.toggle_button.setStyleSheet("background-color: #4CAF50; color: white; padding: 15px 40px;")
+        
+        # 更新按钮样式和文本
+        if hasattr(self, 'toggle_button'):
+            self.toggle_button.setText("开始")
+            self.toggle_button.setStyleSheet("background-color: #4CAF50; color: white; padding: 12px 16px; border-radius: 12px; font-size: 14px; font-weight: bold;")
+            
         self.status_bar.showMessage("就绪")
 
     def toggle_camera(self):
@@ -834,6 +1071,14 @@ class FaceMaskApp(QMainWindow):
             self.stop_camera()
         else:
             self.start_camera()
+        # 确保UI状态一致性
+        if hasattr(self, 'toggle_button'):
+            if self.is_camera_running:
+                self.toggle_button.setText("停止")
+                self.toggle_button.setStyleSheet("background-color: #F44336; color: white; padding: 12px 16px; border-radius: 12px; font-size: 14px; font-weight: bold;")
+            else:
+                self.toggle_button.setText("开始")
+                self.toggle_button.setStyleSheet("background-color: #4CAF50; color: white; padding: 12px 16px; border-radius: 12px; font-size: 14px; font-weight: bold;")
 
     def closeEvent(self, event):
         self.stop_camera()
@@ -845,6 +1090,48 @@ def main():
     app.setFont(QFont("Microsoft YaHei", 10))
     window = FaceMaskApp()
     window.show()
+    
+    # 程序启动时自动尝试打开摄像头
+    def try_camera():
+        try:
+            # 创建临时VideoWorker来测试摄像头
+            test_worker = VideoWorker()
+            test_worker.moveToThread(QThread.currentThread())
+            
+            # 尝试打开摄像头
+            camera_indices = [0, 1, 2]
+            cap = None
+            for i in camera_indices:
+                cap = cv2.VideoCapture(i)
+                if cap.isOpened():
+                    cap.release()
+                    # 摄像头可用，启动主程序摄像头
+                    window.start_camera()
+                    return True
+                else:
+                    cap.release()
+            
+            # 摄像头不可用，显示重试/退出对话框
+            while True:
+                reply = QMessageBox.question(
+                    window,
+                    "获取摄像头失败",
+                    "无法打开摄像头！请检查设备连接和权限。\n\n是否重试？",
+                    QMessageBox.Retry | QMessageBox.Exit
+                )
+                
+                if reply == QMessageBox.Exit:
+                    return False
+                elif reply == QMessageBox.Retry:
+                    # 重试打开摄像头
+                    if try_camera():
+                        return True
+        except Exception as e:
+            print(f"摄像头测试失败: {e}")
+            return False
+    
+    # 启动时尝试打开摄像头
+    QTimer.singleShot(100, lambda: try_camera())
     sys.exit(app.exec())
 
 
