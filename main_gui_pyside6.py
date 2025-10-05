@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QObject, QThread, Signal, Slot, QTimer, QRect
 from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QImage, QPixmap, QFont, QPalette, QColor, QPainter, QPen
+from PySide6.QtGui import QImage, QPixmap, QFont, QPalette, QColor, QPainter, QPen, QIcon
 
 import mediapipe as mp
 
@@ -26,7 +26,7 @@ DISPLAY_SIZE = (1280, 720)
 MASK_ALPHA_DEFAULT = 0.28
 ORIGINAL_EYE_DISTANCE = 100
 # 提高切换脸谱的灵敏度，从0.1增加到0.15
-HAND_FACE_THRESHOLD = 0.15
+HAND_FACE_THRESHOLD = 1
 
 # 功能模式枚举
 class Mode:
@@ -486,6 +486,11 @@ class FaceMaskApp(QMainWindow):
         self.worker = None
         self.latest_frame = None  # 用于截图
         self.resources_loaded = False  # 标记资源是否已加载
+        
+        # 样式变量，设为实例变量以便全局访问
+        self.button_style = ""
+        self.mode_button_style = ""
+        self.control_button_style = ""
 
         self.init_ui()
         # 默认不加载资源，按需加载
@@ -520,7 +525,7 @@ class FaceMaskApp(QMainWindow):
         main_layout.addWidget(top_toolbar)
 
         # 工具栏按钮通用样式
-        button_style = """
+        self.button_style = """
             QPushButton {
                 padding: 12px 16px;
                 border-radius: 12px;
@@ -539,7 +544,7 @@ class FaceMaskApp(QMainWindow):
         """
 
         # 模式按钮 - 鲜艳的绿色系
-        mode_button_style = button_style.replace("background-color: #4CAF50;", "background-color: #4CAF50;")
+        self.mode_button_style = self.button_style.replace("background-color: #4CAF50;", "background-color: #4CAF50;")
         self.mode_buttons = {}
         modes = [
             (Mode.FACE_MASK, "川剧变脸"),
@@ -548,13 +553,23 @@ class FaceMaskApp(QMainWindow):
             (Mode.BODY_SKELETON, "人体骨架"),
         ]
         button_group = QButtonGroup(self)
+        icon_map = {
+            Mode.FACE_MASK: QIcon(os.path.join('resources', 'icons', 'face.png')),
+            Mode.FACE_MESH: QIcon(os.path.join('resources', 'icons', 'mesh.jpg')),
+            Mode.HAND_SKELETON: QIcon(os.path.join('resources', 'icons', 'hand.png')),
+            Mode.BODY_SKELETON: QIcon(os.path.join('resources', 'icons', 'pose.png'))
+        }
+        
         for mode, text in modes:
             btn = QPushButton(text)
+            btn.setIcon(icon_map[mode])
+            btn.setIconSize(btn.sizeHint() / 2)  # 设置图标大小
             btn.setCheckable(True)
-            btn.setStyleSheet(mode_button_style)
+            btn.setStyleSheet(self.mode_button_style)
             btn.clicked.connect(lambda _, m=mode: self.switch_mode(m))
             self.mode_buttons[mode] = btn
             button_group.addButton(btn)
+            top_toolbar.addWidget(btn)
             # 为模式按钮之间增加小间距
             spacer = QWidget()
             spacer.setFixedWidth(5)
@@ -571,11 +586,15 @@ class FaceMaskApp(QMainWindow):
         top_toolbar.addWidget(spacer)
 
         # 控制按钮 - 鲜艳的蓝色系
-        control_button_style = button_style.replace("background-color: #4CAF50;", "background-color: #2196F3;")
+        self.control_button_style = self.button_style.replace("background-color: #4CAF50;", "background-color: #2196F3;")
         
         # 将开始/停止按钮移到顶部工具栏
         self.toggle_button = QPushButton("开始")
-        self.toggle_button.setStyleSheet(control_button_style)
+        # 创建一个简单的相机图标
+        camera_icon = QIcon()
+        self.toggle_button.setIcon(camera_icon)
+        self.toggle_button.setIconSize(self.toggle_button.sizeHint() / 2)
+        self.toggle_button.setStyleSheet(self.control_button_style)
         self.toggle_button.clicked.connect(self.toggle_camera)
         top_toolbar.addWidget(self.toggle_button)
 
@@ -589,7 +608,11 @@ class FaceMaskApp(QMainWindow):
         top_toolbar.addWidget(spacer)
 
         screenshot_btn = QPushButton("截图")
-        screenshot_btn.setStyleSheet(control_button_style)
+        # 创建一个简单的相机图标
+        camera_icon = QIcon()
+        screenshot_btn.setIcon(camera_icon)
+        screenshot_btn.setIconSize(screenshot_btn.sizeHint() / 2)
+        screenshot_btn.setStyleSheet(self.control_button_style)
         screenshot_btn.clicked.connect(self.take_screenshot)
         top_toolbar.addWidget(screenshot_btn)
         # 为截图和录制按钮之间增加小间距
@@ -598,7 +621,11 @@ class FaceMaskApp(QMainWindow):
         top_toolbar.addWidget(spacer)
 
         self.record_btn = QPushButton("录制视频")
-        self.record_btn.setStyleSheet(control_button_style)
+        # 创建一个简单的视频图标
+        video_icon = QIcon()
+        self.record_btn.setIcon(video_icon)
+        self.record_btn.setIconSize(self.record_btn.sizeHint() / 2)
+        self.record_btn.setStyleSheet(self.control_button_style)
         self.record_btn.clicked.connect(self.toggle_recording)
         top_toolbar.addWidget(self.record_btn)
 
@@ -612,7 +639,11 @@ class FaceMaskApp(QMainWindow):
         top_toolbar.addWidget(spacer)
 
         about_btn = QPushButton("关于我")
-        about_btn.setStyleSheet(control_button_style)
+        # 创建一个简单的信息图标
+        info_icon = QIcon()
+        about_btn.setIcon(info_icon)
+        about_btn.setIconSize(about_btn.sizeHint() / 2)
+        about_btn.setStyleSheet(self.control_button_style)
         about_btn.clicked.connect(self.show_about_dialog)
         top_toolbar.addWidget(about_btn)
 
@@ -936,33 +967,89 @@ class FaceMaskApp(QMainWindow):
             if self.worker:
                 self.worker.start_recording()
                 self.record_btn.setText("停止录制")
-                self.record_btn.setStyleSheet("color: red;")
+                # 保留其他样式，只改变颜色
+                self.record_btn.setStyleSheet(self.control_button_style.replace("color: white;", "color: red;"))
         else:
             if self.worker:
                 path = self.worker.stop_recording()
                 self.record_btn.setText("录制视频")
-                self.record_btn.setStyleSheet("")
+                # 恢复原始样式
+                self.record_btn.setStyleSheet(self.control_button_style)
                 if path:
                     self.status_bar.showMessage(f"视频已保存至: {path}")
 
     def show_about_dialog(self):
+        # 创建自定义对话框
         about_dialog = QDialog(self)
         about_dialog.setWindowTitle("关于")
-        about_dialog.resize(400, 300)
+        about_dialog.resize(450, 350)
+        
+        # 设置对话框样式，与主UI保持一致
+        about_dialog.setStyleSheet("background-color: #FFF8E1;")
+        
         layout = QVBoxLayout(about_dialog)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        
+        # 标题
         title = QLabel("川剧变脸 - 特效相机")
         title.setFont(QFont("Microsoft YaHei", 18, QFont.Bold))
         title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("color: #333333;")
+        layout.addWidget(title)
+        
+        # 分隔线
+        line = QFrame()
+        line.setFrameShape(QFrame.HLine)
+        line.setFrameShadow(QFrame.Sunken)
+        line.setStyleSheet("background-color: #cccccc;")
+        layout.addWidget(line)
+        
+        # 信息文本
         info = QLabel("基于OpenCV和MediaPipe的实时人脸特效应用\n\n"
                       "- 川剧变脸：手势切换\n- 人脸/手/人体骨架\n- 截图 & 录制")
         info.setWordWrap(True)
+        info.setFont(QFont("Microsoft YaHei", 11))
+        info.setAlignment(Qt.AlignCenter)
+        info.setStyleSheet("color: #555555;")
+        layout.addWidget(info)
+        
+        # 添加微信图片（如果存在）
+        wechat_path = os.path.join(os.getcwd(), "wechat.jpg")
+        if os.path.exists(wechat_path):
+            wechat_label = QLabel()
+            pixmap = QPixmap(wechat_path)
+            # 调整图片大小
+            scaled_pixmap = pixmap.scaledToWidth(120, Qt.SmoothTransformation)
+            wechat_label.setPixmap(scaled_pixmap)
+            wechat_label.setAlignment(Qt.AlignCenter)
+            layout.addWidget(wechat_label)
+            
+            wechat_text = QLabel("扫码了解更多")
+            wechat_text.setFont(QFont("Microsoft YaHei", 10))
+            wechat_text.setAlignment(Qt.AlignCenter)
+            wechat_text.setStyleSheet("color: #666666;")
+            layout.addWidget(wechat_text)
+        
+        # 版本信息
         version = QLabel("版本 1.0.0")
         version.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title)
-        layout.addSpacing(20)
-        layout.addWidget(info)
-        layout.addStretch()
+        version.setStyleSheet("color: #777777; font-style: italic;")
         layout.addWidget(version)
+        
+        # 按钮区域
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        # 确定按钮，使用与控制按钮一致的样式
+        ok_button = QPushButton("确定")
+        ok_button.setStyleSheet("background-color: #2196F3; color: white; padding: 10px 20px; border-radius: 12px; font-size: 14px; font-weight: bold;")
+        ok_button.clicked.connect(about_dialog.accept)
+        button_layout.addWidget(ok_button)
+        button_layout.addStretch()
+        
+        layout.addLayout(button_layout)
+        
         about_dialog.exec()
 
     def start_camera(self):
@@ -1112,7 +1199,53 @@ class FaceMaskApp(QMainWindow):
 
     def closeEvent(self, event):
         self.stop_camera()
-        event.accept()
+        
+        # 创建自定义退出确认对话框
+        exit_dialog = QDialog(self)
+        exit_dialog.setWindowTitle("确认退出")
+        exit_dialog.resize(350, 180)
+        
+        # 设置对话框样式，与主UI保持一致
+        exit_dialog.setStyleSheet("background-color: #FFF8E1;")
+        
+        layout = QVBoxLayout(exit_dialog)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+        
+        # 提示信息
+        message = QLabel("确定要退出程序吗？")
+        message.setFont(QFont("Microsoft YaHei", 12))
+        message.setAlignment(Qt.AlignCenter)
+        message.setStyleSheet("color: #333333;")
+        layout.addWidget(message)
+        
+        # 按钮区域
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        # 取消按钮
+        cancel_button = QPushButton("取消")
+        cancel_button.setStyleSheet("background-color: #f0f0f0; color: #333333; padding: 10px 20px; border-radius: 12px; font-size: 14px; font-weight: bold;")
+        cancel_button.clicked.connect(exit_dialog.reject)
+        button_layout.addWidget(cancel_button)
+        button_layout.addSpacing(10)
+        
+        # 确定按钮，使用与停止按钮一致的样式
+        ok_button = QPushButton("确定")
+        ok_button.setStyleSheet("background-color: #F44336; color: white; padding: 10px 20px; border-radius: 12px; font-size: 14px; font-weight: bold;")
+        ok_button.clicked.connect(exit_dialog.accept)
+        button_layout.addWidget(ok_button)
+        
+        layout.addLayout(button_layout)
+        
+        # 显示对话框并处理结果
+        if exit_dialog.exec() == QDialog.Accepted:
+            event.accept()
+        else:
+            event.ignore()
+            # 如果用户选择不退出，确保摄像头状态正确
+            if not self.is_camera_running:
+                self.start_camera()
 
 
 def main():
