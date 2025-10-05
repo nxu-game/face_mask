@@ -353,113 +353,163 @@ class VideoWorker(QThread):
         for i in camera_indices:
             self.cap = cv2.VideoCapture(i)
             if self.cap.isOpened():
+                print(f"成功打开摄像头，索引: {i}")
                 break
             else:
                 self.cap.release()
+                print(f"尝试打开摄像头索引 {i} 失败")
                 
         if not self.cap or not self.cap.isOpened():
+            print("无法打开任何摄像头！")
             self.error_occurred.emit("无法打开摄像头！请检查设备连接和权限。")
             return
 
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        # 设置较低的分辨率以提高性能
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        
+        # 打印实际分辨率
+        actual_width = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+        actual_height = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+        print(f"摄像头实际分辨率: {actual_width}x{actual_height}")
+        
         self.load_watermark("wechat.jpg")
 
         self.frame_count = 0
         self.start_time = time.time()
+        frame_emit_count = 0
         
         # 初始化模型为None，按需加载
         face_mesh = None
         hands = None
         pose = None
         
-        while self._is_running:
-            success, frame = self.cap.read()
-            if not success:
-                continue
+        try:
+            while self._is_running:
+                success, frame = self.cap.read()
+                if not success:
+                    print("未成功读取视频帧")
+                    continue
 
-            # 统一在 RGB 空间处理
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                # 确保帧不为空
+                if frame is None or frame.size == 0:
+                    print("读取到空视频帧")
+                    continue
 
-            if self.current_mode == Mode.FACE_MASK:
-                # 按需加载人脸和手部模型
-                if face_mesh is None:
-                    face_mesh = self.mp_face_mesh.FaceMesh(
-                        max_num_faces=1, refine_landmarks=True,
-                        min_detection_confidence=0.5, min_tracking_confidence=0.5
-                    )
-                if hands is None:
-                    hands = self.mp_hands.Hands(
-                        min_detection_confidence=0.5, min_tracking_confidence=0.5
-                    )
-                
-                results_face = face_mesh.process(frame_rgb)
-                results_hand = hands.process(frame_rgb)
+                # 统一在 RGB 空间处理
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
                 processed_frame = frame.copy()  # BGR
 
-                if results_face.multi_face_landmarks:
-                    face_lm = results_face.multi_face_landmarks[0]
-                    if self.face_masks and 0 <= self.current_mask_index < len(self.face_masks):
-                        mask = self.face_masks[self.current_mask_index]
-                        processed_frame = self.apply_mask(processed_frame, mask, face_lm.landmark)
+                try:
+                    if self.current_mode == Mode.FACE_MASK:
+                        # 按需加载人脸和手部模型
+                        if face_mesh is None:
+                            face_mesh = self.mp_face_mesh.FaceMesh(
+                                max_num_faces=1, refine_landmarks=True,
+                                min_detection_confidence=0.5, min_tracking_confidence=0.5
+                            )
+                        if hands is None:
+                            hands = self.mp_hands.Hands(
+                                min_detection_confidence=0.5, min_tracking_confidence=0.5
+                            )
+                        
+                        results_face = face_mesh.process(frame_rgb)
+                        results_hand = hands.process(frame_rgb)
 
-                    if results_hand.multi_hand_landmarks:
-                        for hand_lm in results_hand.multi_hand_landmarks:
-                            if self.is_hand_near_face(hand_lm, face_lm, frame.shape[1], frame.shape[0]):
-                                self.request_mask_switch.emit()
-                                break
-                else:
+                        if results_face.multi_face_landmarks:
+                            face_lm = results_face.multi_face_landmarks[0]
+                            if self.face_masks and 0 <= self.current_mask_index < len(self.face_masks):
+                                mask = self.face_masks[self.current_mask_index]
+                                processed_frame = self.apply_mask(processed_frame, mask, face_lm.landmark)
+
+                            if results_hand.multi_hand_landmarks:
+                                for hand_lm in results_hand.multi_hand_landmarks:
+                                    if self.is_hand_near_face(hand_lm, face_lm, frame.shape[1], frame.shape[0]):
+                                        self.request_mask_switch.emit()
+                                        break
+                        else:
+                            processed_frame = frame.copy()
+
+                    elif self.current_mode == Mode.FACE_MESH:
+                        # 按需加载人脸模型
+                        if face_mesh is None:
+                            face_mesh = self.mp_face_mesh.FaceMesh(
+                                max_num_faces=1, refine_landmarks=True,
+                                min_detection_confidence=0.5, min_tracking_confidence=0.5
+                            )
+                        results_face = face_mesh.process(frame_rgb)
+                        processed_frame = self.draw_face_mesh(frame.copy(), results_face.multi_face_landmarks)
+
+                    elif self.current_mode == Mode.HAND_SKELETON:
+                        # 按需加载手部模型
+                        if hands is None:
+                            hands = self.mp_hands.Hands(
+                                min_detection_confidence=0.5, min_tracking_confidence=0.5
+                            )
+                        results_hand = hands.process(frame_rgb)
+                        processed_frame = self.draw_hand_skeleton(frame.copy(), results_hand.multi_hand_landmarks)
+
+                    elif self.current_mode == Mode.BODY_SKELETON:
+                        # 按需加载身体模型
+                        if pose is None:
+                            pose = self.mp_pose.Pose(
+                                min_detection_confidence=0.5, min_tracking_confidence=0.5
+                            )
+                        results_pose = pose.process(frame_rgb)
+                        # 修复属性错误：使用正确的属性名
+                        processed_frame = self.draw_body_skeleton(frame.copy(), results_pose.pose_landmarks)
+                except Exception as process_error:
+                    print(f"帧处理错误: {process_error}")
+                    # 出错时使用原始帧
                     processed_frame = frame.copy()
 
-            elif self.current_mode == Mode.FACE_MESH:
-                # 按需加载人脸模型
-                if face_mesh is None:
-                    face_mesh = self.mp_face_mesh.FaceMesh(
-                        max_num_faces=1, refine_landmarks=True,
-                        min_detection_confidence=0.5, min_tracking_confidence=0.5
-                    )
-                results_face = face_mesh.process(frame_rgb)
-                processed_frame = self.draw_face_mesh(frame.copy(), results_face.multi_face_landmarks)
+                # 统一缩放镜像
+                try:
+                    display_frame = self.scale_and_mirror(processed_frame)
+                except Exception as scale_error:
+                    print(f"缩放镜像错误: {scale_error}")
+                    # 出错时使用原始帧
+                    display_frame = frame.copy()
 
-            elif self.current_mode == Mode.HAND_SKELETON:
-                # 按需加载手部模型
-                if hands is None:
-                    hands = self.mp_hands.Hands(
-                        min_detection_confidence=0.5, min_tracking_confidence=0.5
-                    )
-                results_hand = hands.process(frame_rgb)
-                processed_frame = self.draw_hand_skeleton(frame.copy(), results_hand.multi_hand_landmarks)
+                # 帧率更新
+                self.frame_count += 1
+                elapsed = time.time() - self.start_time
+                if elapsed > 1.0:
+                    fps = self.frame_count / elapsed
+                    self.fps_updated.emit(fps)
+                    print(f"FPS: {fps:.1f}")
+                    self.frame_count = 0
+                    self.start_time = time.time()
 
-            elif self.current_mode == Mode.BODY_SKELETON:
-                # 按需加载身体模型
-                if pose is None:
-                    pose = self.mp_pose.Pose(
-                        min_detection_confidence=0.5, min_tracking_confidence=0.5
-                    )
-                results_pose = pose.process(frame_rgb)
-                # 修复属性错误：使用正确的属性名
-                processed_frame = self.draw_body_skeleton(frame.copy(), results_pose.pose_landmarks)
+                # 录制（带水印）
+                if self.is_recording and self.video_writer:
+                    try:
+                        video_frame = self.add_watermark(display_frame.copy())
+                        self.video_writer.write(video_frame)
+                    except Exception as record_error:
+                        print(f"录制错误: {record_error}")
 
-            # 统一缩放镜像
-            display_frame = self.scale_and_mirror(processed_frame)
-
-            # 帧率更新
-            self.frame_count += 1
-            elapsed = time.time() - self.start_time
-            if elapsed > 1.0:
-                fps = self.frame_count / elapsed
-                self.fps_updated.emit(fps)
-                self.frame_count = 0
-                self.start_time = time.time()
-
-            # 录制（带水印）
-            if self.is_recording and self.video_writer:
-                video_frame = self.add_watermark(display_frame.copy())
-                self.video_writer.write(video_frame)
-
-
-            self.frame_ready.emit(display_frame)
-            self.msleep(30)
+                # 每5帧才发送一次信号，减轻UI负担
+                frame_emit_count += 1
+                if frame_emit_count % 2 == 0:
+                    try:
+                        # 确保display_frame有效
+                        if display_frame is not None and display_frame.size > 0:
+                            self.frame_ready.emit(display_frame)
+                            # 仅在控制台定期打印
+                            if frame_emit_count % 20 == 0:
+                                print(f"已发送帧 #{frame_emit_count}")
+                        else:
+                            print("尝试发送无效帧")
+                    except Exception as emit_error:
+                        print(f"发送帧信号错误: {emit_error}")
+                
+                # 更短的休眠时间，提高响应速度
+                self.msleep(15)
+        except Exception as e:
+            print(f"运行时错误: {e}")
+            self.error_occurred.emit(f"程序运行错误: {str(e)}")
 
         # 清理资源
         if face_mesh:
@@ -502,10 +552,36 @@ class FaceMaskApp(QMainWindow):
         if self.worker is None:
             self.worker = VideoWorker()
         # 确保信号槽连接总是建立，无论worker是否为None
-        self.worker.frame_ready.connect(self.on_frame_ready)
-        self.worker.error_occurred.connect(self.on_error)
-        self.worker.fps_updated.connect(self.update_fps_display)
-        self.worker.request_mask_switch.connect(self.next_mask)
+        try:
+            # 断开之前的连接（如果有）
+            try:
+                self.worker.frame_ready.disconnect(self.on_frame_ready)
+            except:
+                pass
+            try:
+                self.worker.error_occurred.disconnect(self.on_error)
+            except:
+                pass
+            try:
+                self.worker.fps_updated.disconnect(self.update_fps_display)
+            except:
+                pass
+            try:
+                self.worker.request_mask_switch.disconnect(self.next_mask)
+            except:
+                pass
+            
+            # 重新连接信号槽
+            self.worker.frame_ready.connect(self.on_frame_ready, Qt.QueuedConnection)
+            self.worker.error_occurred.connect(self.on_error, Qt.QueuedConnection)
+            self.worker.fps_updated.connect(self.update_fps_display, Qt.QueuedConnection)
+            self.worker.request_mask_switch.connect(self.next_mask, Qt.QueuedConnection)
+            print("信号槽连接成功建立")
+        except Exception as e:
+            print(f"建立信号槽连接时出错: {e}")
+            # 在UI上显示错误消息
+            if self.isVisible():
+                self.status_bar.showMessage(f"信号连接错误: {str(e)}")
 
     def init_ui(self):
         palette = self.palette()
@@ -778,16 +854,49 @@ class FaceMaskApp(QMainWindow):
         self.status_bar.addWidget(self.fps_label)
 
     def load_face_masks(self):
-        face_dir = Path("face")
+        import sys
+        from pathlib import Path
+        
+        # 获取正确的face目录路径
+        try:
+            # 检查是否在PyInstaller打包环境中运行
+            base_path = Path(sys._MEIPASS)
+            face_dir = base_path / "face"
+        except AttributeError:
+            # 非打包环境，使用相对路径
+            face_dir = Path("face")
+        
+        # 确保face目录存在
         face_dir.mkdir(exist_ok=True)
+        
+        # 查找所有图片文件
         image_files = list(face_dir.glob("*.png")) + list(face_dir.glob("*.jpg"))
         self.face_masks = []
+        
         for f in image_files:
-            img = cv2.imread(str(f), cv2.IMREAD_UNCHANGED)
-            if img is not None:
-                self.face_masks.append(img)
+            try:
+                img = cv2.imread(str(f), cv2.IMREAD_UNCHANGED)
+                if img is not None:
+                    self.face_masks.append(img)
+            except Exception as e:
+                print(f"加载图像 {f} 失败: {e}")
+        
         if not self.face_masks:
-            QMessageBox.critical(self, "错误", "未在 'face' 目录中找到 PNG/JPG 图像！")
+            # 如果在打包环境中没有找到资源，尝试从当前工作目录的face文件夹加载
+            if hasattr(sys, '_MEIPASS'):
+                cwd_face_dir = Path.cwd() / "face"
+                if cwd_face_dir.exists():
+                    cwd_image_files = list(cwd_face_dir.glob("*.png")) + list(cwd_face_dir.glob("*.jpg"))
+                    for f in cwd_image_files:
+                        try:
+                            img = cv2.imread(str(f), cv2.IMREAD_UNCHANGED)
+                            if img is not None:
+                                self.face_masks.append(img)
+                        except Exception as e:
+                            print(f"加载工作目录中的图像 {f} 失败: {e}")
+            
+            if not self.face_masks:
+                QMessageBox.critical(self, "错误", "未在 'face' 目录中找到 PNG/JPG 图像！")
 
     def update_mask_preview(self):
         # 清空
@@ -854,67 +963,134 @@ class FaceMaskApp(QMainWindow):
     @Slot(np.ndarray)
     def on_frame_ready(self, frame):
         try:
-            self.latest_frame = frame.copy()  # 缓存用于截图
-            h, w, ch = frame.shape
+            # 首先确保视频标签存在
+            if not hasattr(self, 'video_label'):
+                print("错误: video_label不存在")
+                return
+                
+            # 缓存用于截图
+            if frame is not None and frame.size > 0:
+                self.latest_frame = frame.copy()
+            else:
+                print("警告: 接收到空帧")
+                return
+                
+            # 检查帧的基本信息
+            if len(frame.shape) < 2:
+                print(f"错误: 无效的帧形状: {frame.shape}")
+                return
+                
+            # 获取帧的高度和宽度
+            h, w = frame.shape[:2]
+            ch = 1 if len(frame.shape) == 2 else frame.shape[2]
+            print(f"帧信息: {w}x{h}, {ch}通道, 类型: {frame.dtype}")
             
             # 确保图像数据有效
             if frame.size == 0:
+                print("错误: 帧数据为空")
                 return
                 
             # 检查图像格式并正确转换
             if frame.dtype != np.uint8:
+                print(f"转换帧类型: {frame.dtype} -> uint8")
                 frame = frame.astype(np.uint8)
                 
             # 确保图像是3通道BGR格式
             if len(frame.shape) == 2:  # 灰度图
+                print("转换灰度图到BGR")
                 frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+                ch = 3
             elif frame.shape[2] == 4:  # RGBA
+                print("转换RGBA到BGR")
                 frame = cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+                ch = 3
             elif frame.shape[2] == 3:  # 已经是BGR
+                print("帧已是BGR格式")
                 pass
             else:
+                print(f"错误: 不支持的通道数: {frame.shape[2]}")
                 return
                 
-            # 创建QImage
+            # 创建QImage - 确保使用正确的格式
             bytes_per_line = ch * w
-            qimg = QImage(frame.data, w, h, bytes_per_line, QImage.Format_BGR888)
-            
-            if qimg.isNull():
+            try:
+                qimg = QImage(frame.data, w, h, bytes_per_line, QImage.Format_BGR888)
+                if qimg.isNull():
+                    print("错误: 创建QImage失败")
+                    # 尝试使用另一种方法创建QImage
+                    qimg = QImage(frame.tobytes(), w, h, bytes_per_line, QImage.Format_BGR888)
+                    if qimg.isNull():
+                        print("错误: 再次尝试创建QImage失败")
+                        return
+                    else:
+                        print("成功: 使用tobytes()创建QImage")
+                else:
+                    print("成功: 创建QImage")
+            except Exception as img_err:
+                print(f"创建QImage异常: {img_err}")
                 return
                 
             # 创建QPixmap
-            pixmap = QPixmap.fromImage(qimg)
-            if pixmap.isNull():
+            try:
+                pixmap = QPixmap.fromImage(qimg)
+                if pixmap.isNull():
+                    print("错误: 创建QPixmap失败")
+                    return
+                print("成功: 创建QPixmap")
+            except Exception as pix_err:
+                print(f"创建QPixmap异常: {pix_err}")
                 return
-            # 设置Pixmap
-            self.video_label.setPixmap(pixmap.scaled(self.video_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            
+                
+            # 设置Pixmap到标签 - 使用固定尺寸避免缩放问题
+            try:
+                # 先设置一个固定的尺寸以确保显示
+                self.video_label.setMinimumSize(w, h)
+                # 使用KeepAspectRatio确保图像不变形
+                scaled_pixmap = pixmap.scaled(
+                    self.video_label.size(), 
+                    Qt.KeepAspectRatio, 
+                    Qt.FastTransformation  # 使用FastTransformation代替SmoothTransformation以提高性能
+                )
+                self.video_label.setPixmap(scaled_pixmap)
+                print("成功: 设置Pixmap到video_label")
+            except Exception as set_err:
+                print(f"设置Pixmap异常: {set_err}")
+                return
+                
             # 确保video_label和所有父窗口都可见
             if not self.video_label.isVisible():
+                print("显示video_label")
                 self.video_label.show()
                 
             # 检查并确保所有父窗口都可见
             parent = self.video_label.parentWidget()
             while parent:
                 if not parent.isVisible():
+                    print(f"显示父窗口: {parent.objectName()}")
                     parent.show()
                 parent = parent.parentWidget()
                 
             # 确保主窗口可见
             if not self.isVisible():
+                print("显示主窗口")
                 self.show()
                 self.raise_()
             
-            # 强制更新
-            self.video_label.repaint()
-            # 强制应用程序处理所有待处理的事件
-            QApplication.processEvents()
-            # 强制整个窗口重绘
-            self.update()
-            
+            # 强制更新和重绘
+            try:
+                self.video_label.repaint()
+                self.video_label.update()
+                QApplication.processEvents()
+                self.update()
+                print("强制重绘完成")
+            except Exception as update_err:
+                print(f"重绘异常: {update_err}")
+                
         except Exception as e:
-            # 捕获但不打印异常，以避免控制台输出
-            pass
+            # 捕获并打印异常，以便调试
+            print(f"on_frame_ready异常: {e}")
+            # 在UI上显示错误消息
+            self.status_bar.showMessage(f"视频显示错误: {str(e)}")
 
     @Slot(float)
     def update_fps_display(self, fps):
@@ -950,8 +1126,11 @@ class FaceMaskApp(QMainWindow):
         screenshots_dir.mkdir(exist_ok=True)
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = screenshots_dir / f"screenshot_{timestamp}.png"
-        # 从缓存帧保存
+        # 从缓存帧保存并添加水印
         bgr_frame = self.latest_frame.copy()
+        # 添加微信水印（与视频中相同）
+        if self.worker:
+            bgr_frame = self.worker.add_watermark(bgr_frame)
         success = cv2.imwrite(str(filename), bgr_frame)
         if success:
             self.status_bar.showMessage(f"截图已保存至: {filename}")
