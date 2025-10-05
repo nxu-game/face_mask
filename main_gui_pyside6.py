@@ -25,7 +25,8 @@ PREVIEW_SIZE = 128
 DISPLAY_SIZE = (1280, 720)
 MASK_ALPHA_DEFAULT = 0.28
 ORIGINAL_EYE_DISTANCE = 100
-HAND_FACE_THRESHOLD = 0.1
+# 提高切换脸谱的灵敏度，从0.1增加到0.15
+HAND_FACE_THRESHOLD = 0.15
 
 # 功能模式枚举
 class Mode:
@@ -296,7 +297,8 @@ class VideoWorker(QThread):
         right_eye = face_landmarks[374]
         angle = -degrees(atan2(right_eye.y - left_eye.y, right_eye.x - left_eye.x))
         eye_dist_px = hypot((right_eye.x * w) - (left_eye.x * w), (right_eye.y * h) - (left_eye.y * h))
-        scale = max(min(eye_dist_px / ORIGINAL_EYE_DISTANCE, 1.0), 0.1)
+        # 移除缩放上限，让脸谱可以随人脸变大而相应变大
+        scale = max(eye_dist_px / ORIGINAL_EYE_DISTANCE, 0.1)
         try:
             resized = cv2.resize(mask_img, (0, 0), fx=scale, fy=scale)
             rotated = self.rotate_image(resized, angle)
@@ -552,11 +554,21 @@ class FaceMaskApp(QMainWindow):
             btn.setStyleSheet(mode_button_style)
             btn.clicked.connect(lambda _, m=mode: self.switch_mode(m))
             self.mode_buttons[mode] = btn
-            top_toolbar.addWidget(btn)
             button_group.addButton(btn)
+            # 为模式按钮之间增加小间距
+            spacer = QWidget()
+            spacer.setFixedWidth(5)
+            top_toolbar.addWidget(spacer)
         self.mode_buttons[Mode.FACE_MASK].setChecked(True)
 
+        # 为模式按钮和控制按钮之间增加大间距
+        spacer = QWidget()
+        spacer.setFixedWidth(20)
+        top_toolbar.addWidget(spacer)
         top_toolbar.addSeparator()
+        spacer = QWidget()
+        spacer.setFixedWidth(20)
+        top_toolbar.addWidget(spacer)
 
         # 控制按钮 - 鲜艳的蓝色系
         control_button_style = button_style.replace("background-color: #4CAF50;", "background-color: #2196F3;")
@@ -567,19 +579,37 @@ class FaceMaskApp(QMainWindow):
         self.toggle_button.clicked.connect(self.toggle_camera)
         top_toolbar.addWidget(self.toggle_button)
 
+        # 为控制按钮之间增加大间距
+        spacer = QWidget()
+        spacer.setFixedWidth(15)
+        top_toolbar.addWidget(spacer)
         top_toolbar.addSeparator()
+        spacer = QWidget()
+        spacer.setFixedWidth(15)
+        top_toolbar.addWidget(spacer)
 
         screenshot_btn = QPushButton("截图")
         screenshot_btn.setStyleSheet(control_button_style)
         screenshot_btn.clicked.connect(self.take_screenshot)
         top_toolbar.addWidget(screenshot_btn)
+        # 为截图和录制按钮之间增加小间距
+        spacer = QWidget()
+        spacer.setFixedWidth(5)
+        top_toolbar.addWidget(spacer)
 
         self.record_btn = QPushButton("录制视频")
         self.record_btn.setStyleSheet(control_button_style)
         self.record_btn.clicked.connect(self.toggle_recording)
         top_toolbar.addWidget(self.record_btn)
 
+        # 为录制按钮和关于按钮之间增加大间距
+        spacer = QWidget()
+        spacer.setFixedWidth(15)
+        top_toolbar.addWidget(spacer)
         top_toolbar.addSeparator()
+        spacer = QWidget()
+        spacer.setFixedWidth(15)
+        top_toolbar.addWidget(spacer)
 
         about_btn = QPushButton("关于我")
         about_btn.setStyleSheet(control_button_style)
