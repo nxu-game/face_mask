@@ -76,7 +76,7 @@ face_mask/
 
 - WeChat: znzatop
 
-![WeChat](https://github.com/nxu-game/interesting_assets/raw/main/images/wechat.jpg)
+![WeChat](wechat.jpg)
 
 ## 更多项目
 
